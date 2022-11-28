@@ -1,0 +1,264 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: custom-chaos-workflow-1661502926
+  namespace: litmus
+spec:
+  arguments:
+    parameters:
+      - name: TARGET_PODS
+        value: ""
+      - name: APP_NAME_SPACE
+        value: "k1dx"
+      - name: APP_LABEL
+        value: "app.kubernetes.io/instance=k1dx"
+      - name: APP_KIND
+        value: ""
+      - name: SEQUENCE
+        value: "parallel"
+      - name: adminModeNamespace
+        value: litmus
+      - name: DOMAIN
+        value: ""
+  entrypoint: custom-chaos
+  nodeSelector: # nodeSelector controls placement of all workflow pods created by Argo
+    chaos: "true"
+  tolerations: # tolerations apply to all workflow pods created by Argo
+    - key: "chaos"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+  serviceAccountName: argo-chaos
+  templates:
+    - name: custom-chaos
+      steps:
+        - - name: install-chaos-experiments
+            template: install-chaos-experiments
+        - - name: pod-delete-txz
+            template: pod-delete-txz
+    - name: install-chaos-experiments
+      inputs:
+        artifacts:
+          - name: pod-delete-txz
+            path: /tmp/pod-delete-txz.yaml
+            raw:
+              data: >
+                apiVersion: litmuschaos.io/v1alpha1
+
+                description:
+                  message: |
+                    Deletes a pod belonging to a deployment/statefulset/daemonset
+                kind: ChaosExperiment
+
+                metadata:
+                  name: pod-delete
+                  labels:
+                    name: pod-delete
+                    app.kubernetes.io/part-of: litmus
+                    app.kubernetes.io/component: chaosexperiment
+                    app.kubernetes.io/version: 2.9.0
+                spec:
+                  definition:
+                    scope: Namespaced
+                    permissions:
+                      - apiGroups:
+                          - ""
+                        resources:
+                          - pods
+                        verbs:
+                          - create
+                          - delete
+                          - get
+                          - list
+                          - patch
+                          - update
+                          - deletecollection
+                      - apiGroups:
+                          - ""
+                        resources:
+                          - events
+                        verbs:
+                          - create
+                          - get
+                          - list
+                          - patch
+                          - update
+                      - apiGroups:
+                          - ""
+                        resources:
+                          - configmaps
+                        verbs:
+                          - get
+                          - list
+                      - apiGroups:
+                          - ""
+                        resources:
+                          - pods/log
+                        verbs:
+                          - get
+                          - list
+                          - watch
+                      - apiGroups:
+                          - ""
+                        resources:
+                          - pods/exec
+                        verbs:
+                          - get
+                          - list
+                          - create
+                      - apiGroups:
+                          - apps
+                        resources:
+                          - deployments
+                          - statefulsets
+                          - replicasets
+                          - daemonsets
+                        verbs:
+                          - list
+                          - get
+                      - apiGroups:
+                          - apps.openshift.io
+                        resources:
+                          - deploymentconfigs
+                        verbs:
+                          - list
+                          - get
+                      - apiGroups:
+                          - ""
+                        resources:
+                          - replicationcontrollers
+                        verbs:
+                          - get
+                          - list
+                      - apiGroups:
+                          - argoproj.io
+                        resources:
+                          - rollouts
+                        verbs:
+                          - list
+                          - get
+                      - apiGroups:
+                          - batch
+                        resources:
+                          - jobs
+                        verbs:
+                          - create
+                          - list
+                          - get
+                          - delete
+                          - deletecollection
+                      - apiGroups:
+                          - litmuschaos.io
+                        resources:
+                          - chaosengines
+                          - chaosexperiments
+                          - chaosresults
+                        verbs:
+                          - create
+                          - list
+                          - get
+                          - patch
+                          - update
+                          - delete
+                    image: litmuschaos/go-runner:2.9.0
+                    imagePullPolicy: Always
+                    args:
+                      - -c
+                      - ./experiments -name pod-delete
+                    command:
+                      - /bin/bash
+                    env:
+                      - name: TOTAL_CHAOS_DURATION
+                        value: "15"
+                      - name: RAMP_TIME
+                        value: ""
+                      - name: FORCE
+                        value: "true"
+                      - name: CHAOS_INTERVAL
+                        value: "5"
+                      - name: PODS_AFFECTED_PERC
+                        value: ""
+                      - name: LIB
+                        value: litmus
+                      - name: TARGET_PODS
+                        value: "{{workflow.parameters.TARGET_PODS}}"
+                      - name: NODE_LABEL
+                        value: ""
+                      - name: SEQUENCE
+                        value: parallel
+                    labels:
+                      name: pod-delete
+                      app.kubernetes.io/part-of: litmus
+                      app.kubernetes.io/component: experiment-job
+                      app.kubernetes.io/version: 2.9.0
+      container:
+        args:
+          - kubectl apply -f /tmp/pod-delete-txz.yaml -n
+            {{workflow.parameters.adminModeNamespace}} |  sleep 30
+        command:
+          - sh
+          - -c
+        image: litmuschaos/k8s:2.9.0
+    - name: pod-delete-txz
+      inputs:
+        artifacts:
+          - name: pod-delete-txz
+            path: /tmp/chaosengine-pod-delete-txz.yaml
+            raw:
+              data: |
+                apiVersion: litmuschaos.io/v1alpha1
+                kind: ChaosEngine
+                metadata:
+                  namespace: "{{workflow.parameters.adminModeNamespace}}"
+                  generateName: pod-delete-txz
+                  labels:
+                    instance_id: c66fb028-3b13-46cf-9a81-441d2df5858a
+                    context: pod-delete-txz_k1litmus
+                spec:
+                  appinfo:
+                    appns: "{{workflow.parameters.APP_NAME_SPACE}}"
+                    applabel: "{{workflow.parameters.APP_LABEL}}"
+                    appkind: "{{workflow.parameters.APP_KIND}}"
+                  engineState: active
+                  chaosServiceAccount: litmus-admin
+                  components:
+                    runner:
+                      nodeSelector:
+                        chaos: "true"
+                      tolerations:
+                        - key: "chaos"
+                          operator: "Equal"
+                          value: "true"
+                          effect: "NoSchedule"
+                  experiments:
+                    - name: pod-delete
+                      spec:
+                        components:
+                          nodeSelector:
+                            chaos: "true"
+                          tolerations:
+                            - key: "chaos"
+                              operator: "Equal"
+                              value: "true"
+                              effect: "NoSchedule"
+                          env:
+                            - name: TOTAL_CHAOS_DURATION
+                              value: "300"
+                            - name: CHAOS_INTERVAL
+                              value: "300"
+                            - name: FORCE
+                              value: "false"
+                            - name: PODS_AFFECTED_PERC
+                              value: "33.33"
+                            - name: SEQUENCE
+                              value: "{{workflow.parameters.SEQUENCE}}"
+                        probe: []
+                  annotationCheck: "false"
+      container:
+        args:
+          - -file=/tmp/chaosengine-pod-delete-txz.yaml
+          - -saveName=/tmp/engine-name
+        image: litmuschaos/litmus-checker:2.9.0
